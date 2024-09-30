@@ -37,7 +37,7 @@ export default function App() {
     }
   }
 
-  const { isAuthenticated, isLoading, loginWithRedirect, logout } = useAuth0()
+  const { isAuthenticated, loginWithRedirect, logout } = useAuth0()
 
   return (
     <div>
