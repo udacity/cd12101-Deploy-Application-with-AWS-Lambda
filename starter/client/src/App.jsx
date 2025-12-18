@@ -1,75 +1,72 @@
-import { useAuth0 } from '@auth0/auth0-react'
-import React from 'react'
-import { BrowserRouter, Link, Route, Routes } from 'react-router-dom'
-import { Grid, Menu, Segment } from 'semantic-ui-react'
+// src/App.jsx
+import React from 'react';
+import TokenProbe from "./TokenProbe";
+import { useAuth0 } from '@auth0/auth0-react';
+import { BrowserRouter, Link, Route, Routes, Navigate } from 'react-router-dom';
+import { Grid, Menu, Segment, Loader } from 'semantic-ui-react';
 
-import { EditTodo } from './components/EditTodo'
-import { LogIn } from './components/LogIn'
-import { NotFound } from './components/NotFound'
-import { Todos } from './components/Todos'
+import Todos from './components/Todos';
+import EditTodo from './components/EditTodo';
+import LogIn from './components/LogIn';
+import NewTodoInput from './components/NewTodoInput';
 
 export default function App() {
-  function generateMenu() {
+  const { isAuthenticated, isLoading, loginWithRedirect, logout } = useAuth0();
+
+  const logInLogOutButton = () =>
+    isAuthenticated ? (
+      <Menu.Item name="logout" onClick={() => logout({ returnTo: window.location.origin })}>
+        Log Out
+      </Menu.Item>
+    ) : (
+      <Menu.Item name="login" onClick={() => loginWithRedirect()}>
+        Log In
+      </Menu.Item>
+    );
+
+  const generateMenu = () => (
+    <Menu>
+      <Menu.Item as={Link} to="/">Home</Menu.Item>
+      {isAuthenticated && <Menu.Item as={Link} to="/create">Create</Menu.Item>}
+      <Menu.Menu position="right">{logInLogOutButton()}</Menu.Menu>
+    </Menu>
+  );
+
+  if (isLoading) {
     return (
-      <Menu>
-        <Menu.Item as={Link} to={'/'}>
-          Home
-        </Menu.Item>
-
-        <Menu.Menu position="right">{logInLogOutButton()}</Menu.Menu>
-      </Menu>
-    )
-  }
-
-  function logInLogOutButton() {
-    if (isAuthenticated) {
-      return (
-        <Menu.Item name="logout" onClick={() => logout({ returnTo: window.location.origin })}>
-          Log Out
-        </Menu.Item>
-      )
-    } else {
-      return (
-        <Menu.Item name="login" onClick={() => loginWithRedirect()}>
-          Log In
-        </Menu.Item>
-      )
-    }
-  }
-
-  const { isAuthenticated, isLoading, loginWithRedirect, logout } = useAuth0()
-
-  return (
-    <div>
-      <Segment style={{ padding: '8em 0em' }} vertical>
-        <Grid container stackable verticalAlign="middle">
-          <Grid.Row>
-            <Grid.Column width={16}>
-              <BrowserRouter>
-                {generateMenu()}
-
-                {generateCurrentPage(isAuthenticated)}
-              </BrowserRouter>
-            </Grid.Column>
-          </Grid.Row>
-        </Grid>
+      <Segment vertical style={{ padding: '8em 0em' }}>
+        <Loader active inline="centered">Loading…</Loader>
       </Segment>
-    </div>
-  )
-}
-
-function generateCurrentPage(isAuthenticated) {
-  if (!isAuthenticated) {
-    return <LogIn />
+    );
   }
 
   return (
-    <Routes>
-      <Route path="/" exact element={<Todos />} />
-
-      <Route path="/todos/:todoId/edit" exact element={<EditTodo />} />
-
-      <Route path="*" element={<NotFound />} />
-    </Routes>
-  )
+    <Segment style={{ padding: '8em 0em' }} vertical>
+      <Grid container stackable verticalAlign="middle">
+        <Grid.Row>
+          <Grid.Column width={16}>
+            <BrowserRouter>
+    <TokenProbe />
+              {generateMenu()}
+              <Routes>
+                {!isAuthenticated ? (
+                  <>
+                    <Route path="/" element={<LogIn />} />
+                    <Route path="*" element={<LogIn />} />
+                  </>
+                ) : (
+                  <>
+                    <Route path="/" element={<Todos />} />
+                    <Route path="/create" element={<NewTodoInput />} />
+                    <Route path="/todos/:todoId/edit" element={<EditTodo />} />
+                    <Route path="*" element={<Navigate to="/" replace />} />
+                  </>
+                )}
+              </Routes>
+            </BrowserRouter>
+          </Grid.Column>
+        </Grid.Row>
+      </Grid>
+    </Segment>
+  );
 }

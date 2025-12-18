@@ -1,0 +1,256 @@
+service: serverless-todo-app
+frameworkVersion: "3"
+org: mounika18
+app: serverless-todo-app
+configValidationMode: off
+
+plugins:
+  - serverless-iam-roles-per-function
+
+provider:
+  name: aws
+  runtime: nodejs18.x
+  stage: ${opt:stage, 'dev'}
+  region: us-east-2
+  profile: default
+
+  # REST API Gateway (not HTTP API)
+  endpointType: REGIONAL
+  apiGateway:
+    shouldStartNameWithService: true
+    metrics: true
+    binaryMediaTypes:
+      - "*/*"
+    minimumCompressionSize: 1024
+
+  logs:
+    restApi: true
+  tracing:
+    lambda: true
+    apiGateway: true
+
+  environment:
+    TODOS_TABLE: Todos-${self:provider.stage}
+    TODOS_INDEX_NAME: UserIdCreatedAtIndex
+    ATTACHMENTS_BUCKET: todo-attachments-${self:provider.stage}-${aws:accountId}
+    SIGNED_URL_EXPIRATION: 300
+    AUTH0_JWKS_URL: https://dev-mounika1810.us.auth0.com/.well-known/jwks.json
+    AUTH0_AUDIENCE: https://todo-api
+    AUTH0_ISSUER: https://dev-mounika1810.us.auth0.com/
+
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - dynamodb:DescribeTable
+          Resource:
+            - arn:aws:dynamodb:us-east-2:${aws:accountId}:table/${self:provider.environment.TODOS_TABLE}
+        - Effect: Allow
+          Action:
+            - xray:PutTraceSegments
+            - xray:PutTelemetryRecords
+          Resource: "*"
+
+package:
+  individually: true
+  patterns:
+    - "!**/*.md"
+    - "!**/node_modules/aws-sdk/**"
+
+functions:
+  Authorizer:
+    handler: src/lambda/auth/auth0Authorizer.handler
+
+  GetTodos:
+    handler: src/lambda/http/getTodos.handler
+    events:
+      - http:
+          path: todos
+          method: get
+          cors: true
+          authorizer:
+            name: Authorizer
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - dynamodb:Query
+        Resource:
+          - arn:aws:dynamodb:us-east-2:${aws:accountId}:table/${self:provider.environment.TODOS_TABLE}/index/${self:provider.environment.TODOS_INDEX_NAME}
+
+  CreateTodo:
+    handler: src/lambda/http/createTodo.handler
+    events:
+      - http:
+          path: todos
+          method: post
+          cors: true
+          authorizer:
+            name: Authorizer
+          request:
+            schemas:
+              application/json:
+                type: object
+                required: [name, dueDate]
+                additionalProperties: false
+                properties:
+                  name:
+                    type: string
+                    minLength: 1
+                    maxLength: 200
+                  dueDate:
+                    type: string
+                    pattern: "^\\d{4}-\\d{2}-\\d{2}$"
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - dynamodb:PutItem
+        Resource:
+          - arn:aws:dynamodb:us-east-2:${aws:accountId}:table/${self:provider.environment.TODOS_TABLE}
+
+  UpdateTodo:
+    handler: src/lambda/http/updateTodo.handler
+    events:
+      - http:
+          path: todos/{todoId}
+          method: patch
+          cors: true
+          authorizer:
+            name: Authorizer
+          request:
+            schemas:
+              application/json:
+                type: object
+                minProperties: 1
+                additionalProperties: false
+                properties:
+                  name:
+                    type: string
+                    minLength: 1
+                    maxLength: 200
+                  dueDate:
+                    type: string
+                    pattern: "^\\d{4}-\\d{2}-\\d{2}$"
+                  done:
+                    type: boolean
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - dynamodb:UpdateItem
+        Resource:
+          - arn:aws:dynamodb:us-east-2:${aws:accountId}:table/${self:provider.environment.TODOS_TABLE}
+
+  DeleteTodo:
+    handler: src/lambda/http/deleteTodo.handler
+    events:
+      - http:
+          path: todos/{todoId}
+          method: delete
+          cors: true
+          authorizer:
+            name: Authorizer
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - dynamodb:DeleteItem
+        Resource:
+          - arn:aws:dynamodb:us-east-2:${aws:accountId}:table/${self:provider.environment.TODOS_TABLE}
+
+  GenerateUploadUrl:
+    handler: src/lambda/http/generateUploadUrl.handler
+    events:
+      - http:
+          path: todos/{todoId}/attachment
+          method: post
+          cors: true
+          authorizer:
+            name: Authorizer
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - s3:PutObject
+        Resource:
+          - arn:aws:s3:::${self:provider.environment.ATTACHMENTS_BUCKET}/*
+      - Effect: Allow
+        Action:
+          - dynamodb:UpdateItem
+        Resource:
+          - arn:aws:dynamodb:us-east-2:${aws:accountId}:table/${self:provider.environment.TODOS_TABLE}
+
+resources:
+  Resources:
+    # DynamoDB table
+    TodosTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:provider.environment.TODOS_TABLE}
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: userId
+            AttributeType: S
+          - AttributeName: todoId
+            AttributeType: S
+          - AttributeName: createdAt
+            AttributeType: S
+        KeySchema:
+          - AttributeName: userId
+            KeyType: HASH
+          - AttributeName: todoId
+            KeyType: RANGE
+        GlobalSecondaryIndexes:
+          - IndexName: ${self:provider.environment.TODOS_INDEX_NAME}
+            KeySchema:
+              - AttributeName: userId
+                KeyType: HASH
+              - AttributeName: createdAt
+                KeyType: RANGE
+            Projection:
+              ProjectionType: ALL
+
+    # S3 bucket (private)
+    AttachmentsBucket:
+      Type: AWS::S3::Bucket
+      Properties:
+        BucketName: ${self:provider.environment.ATTACHMENTS_BUCKET}
+        OwnershipControls:
+          Rules:
+            - ObjectOwnership: BucketOwnerEnforced
+        PublicAccessBlockConfiguration:
+          BlockPublicAcls: true
+          IgnorePublicAcls: true
+          BlockPublicPolicy: true
+          RestrictPublicBuckets: true
+        CorsConfiguration:
+          CorsRules:
+            - AllowedOrigins: ["*"]
+              AllowedHeaders: ["*"]
+              AllowedMethods: ["GET","PUT","POST","DELETE","HEAD"]
+              MaxAge: 3000
+
+    # Explicit API Gateway response 
+    GatewayResponseDefault4XX:
+      Type: AWS::ApiGateway::GatewayResponse
+      Properties:
+        ResponseType: DEFAULT_4XX
+        RestApiId:
+          Ref: ApiGatewayRestApi
+        ResponseParameters:
+          gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+          gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+          gatewayresponse.header.Access-Control-Allow-Methods: "'GET,OPTIONS,POST,PATCH,DELETE'"
+        StatusCode: '400'
+
+  Outputs:
+    TodosTableName:
+      Value: ${self:provider.environment.TODOS_TABLE}
+    AttachmentsBucketName:
+      Value: ${self:provider.environment.ATTACHMENTS_BUCKET}
+    ApiGatewayRestApiId:
+      Value:
+        Ref: ApiGatewayRestApi
+    ApiGatewayRestApiRootResourceId:
+      Value:
+        Fn::GetAtt: [ ApiGatewayRestApi, RootResourceId ]
+    ApiGatewayInvokeUrl:
+      Value:
+        Fn::Sub: "https://${ApiGatewayRestApi}.execute-api.${AWS::Region}.amazonaws.com/${self:provider.stage}"

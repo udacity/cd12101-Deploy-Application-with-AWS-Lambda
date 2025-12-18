@@ -1,5 +1,10 @@
-import * as React from 'react'
+import React from 'react';
 
-export function NotFound() {
-  return <h1>Not Found</h1>
+export default function NotFound() {
+  return (
+    <div style={{ textAlign: 'center', marginTop: '5em' }}>
+      <h2>404 - Not Found</h2>
+      <p>The page you’re looking for doesn’t exist.</p>
+    </div>
+  );
 }

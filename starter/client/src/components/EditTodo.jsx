@@ -1,86 +1,43 @@
-import { useAuth0 } from '@auth0/auth0-react'
-import React, { useState } from 'react'
-import { useParams } from 'react-router-dom'
-import { Button, Form } from 'semantic-ui-react'
-import { getUploadUrl, uploadFile } from '../api/todos-api'
+import React, { useState } from 'react';
+import { Button, Form } from 'semantic-ui-react';
+import { useNavigate, useParams } from 'react-router-dom';
+import { useApiToken } from '../auth/token';
 
-const UploadState = {
-  NoUpload: 'NoUpload',
-  FetchingPresignedUrl: 'FetchingPresignedUrl',
-  UploadingFile: 'UploadingFile'
-}
+const API = process.env.REACT_APP_API_ENDPOINT;
 
-export function EditTodo() {
-  function renderButton() {
-    return (
-      <div>
-        {uploadState === UploadState.FetchingPresignedUrl && (
-          <p>Uploading image metadata</p>
-        )}
-        {uploadState === UploadState.UploadingFile && <p>Uploading file</p>}
-        <Button loading={uploadState !== UploadState.NoUpload} type="submit">
-          Upload
-        </Button>
-      </div>
-    )
-  }
+export default function EditTodo() {
+  const { todoId } = useParams();
+  const [name, setName] = useState('');
+  const [dueDate, setDueDate] = useState('');
+  const navigate = useNavigate();
+  const getToken = useApiToken();
 
-  function handleFileChange(event) {
-    const files = event.target.files
-    if (!files) return
-
-    setFile(files[0])
-  }
-
-  async function handleSubmit(event) {
-    event.preventDefault()
-
-    try {
-      if (!file) {
-        alert('File should be selected')
-        return
-      }
-
-      setUploadState(UploadState.FetchingPresignedUrl)
-      const accessToken = await getAccessTokenSilently({
-        audience: `https://test-endpoint.auth0.com/api/v2/`,
-        scope: 'write:todos'
-      })
-      const uploadUrl = await getUploadUrl(accessToken, todoId)
-
-      setUploadState(UploadState.UploadingFile)
-      await uploadFile(uploadUrl, file)
-
-      alert('File was uploaded!')
-    } catch (e) {
-      alert('Could not upload a file: ' + e.message)
-    } finally {
-      setUploadState(UploadState.NoUpload)
-    }
-  }
-
-  const [file, setFile] = useState(undefined)
-  const [uploadState, setUploadState] = useState(UploadState.NoUpload)
-  const { getAccessTokenSilently } = useAuth0()
-  const { todoId } = useParams()
+  const save = async () => {
+    const token = await getToken();
+    await fetch(`${API}/todos/${todoId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ name, dueDate }),
+    });
+    navigate('/');
+  };
 
   return (
-    <div>
-      <h1>Upload new image</h1>
-
-      <Form onSubmit={handleSubmit}>
-        <Form.Field>
-          <label>File</label>
-          <input
-            type="file"
-            accept="image/*"
-            placeholder="Image to upload"
-            onChange={handleFileChange}
-          />
-        </Form.Field>
-
-        {renderButton()}
-      </Form>
-    </div>
-  )
+    <Form onSubmit={save}>
+      <Form.Input
+        label="Name"
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        required
+      />
+      <Form.Input
+        label="Due Date (YYYY-MM-DD)"
+        value={dueDate}
+        onChange={(e) => setDueDate(e.target.value)}
+        required
+      />
+      <Button primary type="submit">Save</Button>
+      <Button onClick={() => navigate('/')}>Cancel</Button>
+    </Form>
+  );
 }

@@ -1,59 +1,239 @@
-service: serverless-todo-app
-
-plugins:
-  - serverless-iam-roles-per-function
-
-frameworkVersion: '3'
+service: serverless-todo-api
+frameworkVersion: "3"
 
 provider:
   name: aws
-  runtime: nodejs14.x
+  runtime: nodejs18.x
+  region: us-east-2
+  stage: prod
+  profile: default
+  environment:
+    TODOS_TABLE: ${self:service}-todos-${sls:stage}
+    TODOS_INDEX_NAME: UserIdCreatedAtIndex
+    ATTACHMENTS_S3_BUCKET: ${self:service}-${sls:stage}-attachments-${aws:accountId}
+    SIGNED_URL_EXPIRATION: 300
+    AUTH0_DOMAIN: ${env:AUTH0_DOMAIN}
+    AUTH0_AUDIENCE: ${env:AUTH0_AUDIENCE, 'https://todo-api'}
+    AUTH0_JWKS_URL: https://${env:AUTH0_DOMAIN}/.well-known/jwks.json
+    AUTH0_ISSUER: https://${env:AUTH0_DOMAIN}/
+    WEB_ORIGIN: '*'
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - dynamodb:Query
+            - dynamodb:Scan
+            - dynamodb:GetItem
+            - dynamodb:PutItem
+            - dynamodb:UpdateItem
+            - dynamodb:DeleteItem
+          Resource:
+            - arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.TODOS_TABLE}
+            - arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.TODOS_TABLE}/index/${self:provider.environment.TODOS_INDEX_NAME}
+        - Effect: Allow
+          Action:
+            - s3:PutObject
+            - s3:GetObject
+            - s3:DeleteObject
+            - s3:ListBucket
+          Resource:
+            - arn:aws:s3:::${self:provider.environment.ATTACHMENTS_S3_BUCKET}
+            - arn:aws:s3:::${self:provider.environment.ATTACHMENTS_S3_BUCKET}/*
 
 functions:
-
-  Auth:
+  auth0Authorizer:
     handler: src/lambda/auth/auth0Authorizer.handler
 
-  # TODO: Configure this function
-  GetTodos:
+  getTodos:
     handler: src/lambda/http/getTodos.handler
     events:
       - http:
-          method: get
           path: todos
+          method: get
+          cors:
+            origin: '*'
+            headers:
+              - Content-Type
+              - X-Amz-Date
+              - Authorization
+              - X-Api-Key
+              - X-Amz-Security-Token
+              - X-Amz-User-Agent
+            allowCredentials: false
+          authorizer:
+            name: auth0Authorizer
+            resultTtlInSeconds: 300
 
-  # TODO: Configure this function
-  CreateTodo:
+  createTodo:
     handler: src/lambda/http/createTodo.handler
     events:
       - http:
-          method: post
           path: todos
+          method: post
+          cors:
+            origin: '*'
+            headers:
+              - Content-Type
+              - X-Amz-Date
+              - Authorization
+              - X-Api-Key
+              - X-Amz-Security-Token
+              - X-Amz-User-Agent
+            allowCredentials: false
+          authorizer:
+            name: auth0Authorizer
+            resultTtlInSeconds: 300
 
-  # TODO: Configure this function
-  UpdateTodo:
+  updateTodo:
     handler: src/lambda/http/updateTodo.handler
     events:
       - http:
-          method: patch
           path: todos/{todoId}
+          method: patch
+          cors:
+            origin: '*'
+            headers:
+              - Content-Type
+              - X-Amz-Date
+              - Authorization
+              - X-Api-Key
+              - X-Amz-Security-Token
+              - X-Amz-User-Agent
+            allowCredentials: false
+          authorizer:
+            name: auth0Authorizer
+            resultTtlInSeconds: 300
 
-  # TODO: Configure this function
-  DeleteTodo:
+  deleteTodo:
     handler: src/lambda/http/deleteTodo.handler
     events:
       - http:
-          method: delete
           path: todos/{todoId}
+          method: delete
+          cors:
+            origin: '*'
+            headers:
+              - Content-Type
+              - X-Amz-Date
+              - Authorization
+              - X-Api-Key
+              - X-Amz-Security-Token
+              - X-Amz-User-Agent
+            allowCredentials: false
+          authorizer:
+            name: auth0Authorizer
+            resultTtlInSeconds: 300
 
-  # TODO: Configure this function
-  GenerateUploadUrl:
+  generateUploadUrl:
     handler: src/lambda/http/generateUploadUrl.handler
     events:
       - http:
-          method: post
           path: todos/{todoId}/attachment
+          method: post
+          cors:
+            origin: '*'
+            headers:
+              - Content-Type
+              - X-Amz-Date
+              - Authorization
+              - X-Api-Key
+              - X-Amz-Security-Token
+              - X-Amz-User-Agent
+            allowCredentials: false
+          authorizer:
+            name: auth0Authorizer
+            resultTtlInSeconds: 300
 
 resources:
   Resources:
-    # TODO: Add any necessary AWS resources
+    GatewayResponseDefault4XX:
+      Type: AWS::ApiGateway::GatewayResponse
+      Properties:
+        ResponseParameters:
+          gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+          gatewayresponse.header.Access-Control-Allow-Headers: "'*'"
+        ResponseType: DEFAULT_4XX
+        RestApiId:
+          Ref: ApiGatewayRestApi
+    
+    GatewayResponseDefault5XX:
+      Type: AWS::ApiGateway::GatewayResponse
+      Properties:
+        ResponseParameters:
+          gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+          gatewayresponse.header.Access-Control-Allow-Headers: "'*'"
+        ResponseType: DEFAULT_5XX
+        RestApiId:
+          Ref: ApiGatewayRestApi
+
+    TodosTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:provider.environment.TODOS_TABLE}
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: userId
+            AttributeType: S
+          - AttributeName: todoId
+            AttributeType: S
+          - AttributeName: createdAt
+            AttributeType: S
+        KeySchema:
+          - AttributeName: userId
+            KeyType: HASH
+          - AttributeName: todoId
+            KeyType: RANGE
+        LocalSecondaryIndexes:
+          - IndexName: ${self:provider.environment.TODOS_INDEX_NAME}
+            KeySchema:
+              - AttributeName: userId
+                KeyType: HASH
+              - AttributeName: createdAt
+                KeyType: RANGE
+            Projection:
+              ProjectionType: ALL
+
+    AttachmentsBucket:
+      Type: AWS::S3::Bucket
+      Properties:
+        BucketName: ${self:provider.environment.ATTACHMENTS_S3_BUCKET}
+        CorsConfiguration:
+          CorsRules:
+            - AllowedOrigins:
+                - "*"
+              AllowedMethods:
+                - GET
+                - PUT
+                - POST
+                - DELETE
+                - HEAD
+              AllowedHeaders:
+                - "*"
+              ExposedHeaders:
+                - ETag
+              MaxAge: 3000
+
+# ✅ Outputs section
+outputs:
+  ApiGatewayInvokeURL:
+    Description: "Base URL of the deployed API Gateway"
+    Value: 
+      Fn::Join:
+        - ""
+        - - "https://"
+          - Ref: ApiGatewayRestApi
+          - ".execute-api.${self:provider.region}.amazonaws.com/"
+          - ${sls:stage}
+    Export:
+      Name: ${self:service}-${sls:stage}-ApiGatewayInvokeURL
+
+  AttachmentsBucketName:
+    Description: "Name of the S3 bucket for attachments"
+    Value: ${self:provider.environment.ATTACHMENTS_S3_BUCKET}
+    Export:
+      Name: ${self:service}-${sls:stage}-AttachmentsBucket
+
+  Region:
+    Description: "AWS region for this deployment"
+    Value: ${self:provider.region}
